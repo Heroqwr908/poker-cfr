@@ -120,20 +120,27 @@ class CFRTrainer:
         self.node_map = {}    # maps info-set key -> Node; each trainer owns its own table
         self.game = game
 
-    def train(self, iterations: int) -> None:
+    def train(self, iterations: int) -> float:
         """Run CFR self-play for a fixed number of iterations.
 
-        Prints the average game value and the learned average strategy
-        at every information set.
+        Runs the CFR loop for provided number of iterations and 
+        returns the average game value.
 
         Parameters
         ----------
         iterations : int
             Number of full-tree CFR passes to run.
+        
+        Returns
+        -------
+        float
+            The running-mean average game value across all iterations,
+            measured from player 0's perspective at the root. This is a
+            training diagnostic, not the exact game value -- see Notes.
 
         Notes
         -----
-        The printed "average game value" is a running mean of the
+        The returned "average game value" is a running mean of the
         per-iteration root utility under each iteration's *current*
         strategy -- not the value of the final averaged strategy -- so
         it only trends toward the true value and
@@ -143,10 +150,9 @@ class CFRTrainer:
         for i in range(iterations):
             util += self.cfr("", 1, 1)  # start from the empty history
 
-        print(f"Average game value: {util / iterations}")
-
-        for key in sorted(self.node_map):
-            print(self.node_map[key])
+        avg_game_value = util / iterations
+        
+        return avg_game_value
 
     def cfr(self, history: str, p0: float, p1: float) -> float:
         """Recursively compute counterfactual utility for one history.
@@ -215,3 +221,17 @@ class CFRTrainer:
         node.regret_sum = node.regret_sum + (p1 if player == 0 else p0) * regret
 
         return node_util
+    
+    def get_average_strategies(self) -> dict[str, np.ndarray]:
+        """Return the learned average strategy at every information set.
+
+        Builds a fresh dictionary mapping each info-set key to its
+        reach-weighted average strategy.
+
+        Returns
+        -------
+        dict[str, np.ndarray]
+            Mapping from info-set key to that info set's average strategy.
+        """
+        avg_strategies = {key: self.node_map[key].get_average_strategy() for key in self.node_map}
+        return avg_strategies
