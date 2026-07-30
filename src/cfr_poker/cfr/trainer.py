@@ -1,6 +1,6 @@
 """Counterfactual Regret Minimization (CFR) trainer.
 
-Game-agnostic implementation of vanilla (full-tree, non-sampled) CFR.
+Game-agnostic implementation of vanilla (full-tree) CFR.
 The trainer walks the full game tree each iteration, applies
 regret-matching at every information set, and accumulates a running
 average strategy that converges toward a Nash equilibrium for
@@ -140,21 +140,18 @@ class CFRTrainer:
 
         Notes
         -----
-        The returned "average game value" is a running mean of the
-        per-iteration root utility under each iteration's *current*
-        strategy -- not the value of the final averaged strategy -- so
-        it only trends toward the true value and
-        will not match it exactly.
+        This value is a training diagnostic based on the current 
+        strategy profile, not the final averaged equilibrium strategy.
         """
         util = 0
         for i in range(iterations):
-            util += self.cfr("", 1, 1)  # start from the empty history
+            util += self.cfr("", 1, 1, 1)  # start from the empty history
 
         avg_game_value = util / iterations
         
         return avg_game_value
 
-    def cfr(self, history: str, p0: float, p1: float) -> float:
+    def cfr(self, history: str, p0: float, p1: float, p_chance: float) -> float:
         """Recursively compute counterfactual utility for one history.
 
         Walks the subtree rooted at `history`, updating regrets and the
@@ -167,8 +164,14 @@ class CFRTrainer:
         history : str
             Encoded sequence of actions (and chance outcomes) so far.
         p0, p1 : float
-            Reach probabilities of players 0 and 1 respectively -- the
-            product of their own action probabilities along `history`.
+            Own reach probabilities of players 0 and 1 -- the product 
+            of each player's own action probabilities along history. 
+            Chance probabilities are deliberately excluded; they are 
+            tracked separately in p_chance.
+        p_chance : float
+            Chance reach: the product of all chance-outcome probabilities 
+            along history. Enters the counterfactual regret weight but never 
+            the strategy average, which is weighted by own reach alone.
 
         Returns
         -------
@@ -181,11 +184,13 @@ class CFRTrainer:
         if self.game.is_terminal(history):
             return self.game.get_utility(history)
 
-        # Chance node (e.g. the deal): sample an outcome and recurse without touching regrets.
+        # Traverse chance outcomes and update chance reach.
         elif self.game.is_chance_node(history):
-            a = self.game.sample_outcome(history)
-            next_history = history + a
-            return self.cfr(next_history, p0, p1)
+            chance_sum = 0
+            for a, probability in self.game.enumerate_chance(history).items():
+                next_history = history + a
+                chance_sum += probability * self.cfr(next_history, p0, p1, p_chance * probability)
+            return chance_sum
 
         player = self.game.get_player(history)
         info_set = self.game.get_info_set(history)
@@ -209,16 +214,17 @@ class CFRTrainer:
             # Negate the child's value: zero-sum, and the child's acting player is the opponent.
             # Advance only the acting player's reach by the probability of the action taken.
             if player == 0:
-                util[i] = -self.cfr(next_history, p0 * strategy[i], p1)
+                util[i] = -self.cfr(next_history, p0 * strategy[i], p1, p_chance)
             else:
-                util[i] = -self.cfr(next_history, p0, p1 * strategy[i])
+                util[i] = -self.cfr(next_history, p0, p1 * strategy[i], p_chance)
 
             node_util += (strategy[i] * util[i])    
 
-        # Counterfactual regret: how much better each action was than the node's expected value,
-        # weighted by the *opponent's* reach (the counterfactual "how likely we got here").
+        # Counterfactual regret: how much better each action was than the node's 
+        # expected value, weighted by the *opponent's* reach x chance reach 
+        # (the counterfactual "how likely we got here").
         regret = util - node_util
-        node.regret_sum = node.regret_sum + (p1 if player == 0 else p0) * regret
+        node.regret_sum = node.regret_sum + (p1 if player == 0 else p0) * regret * p_chance
 
         return node_util
     
