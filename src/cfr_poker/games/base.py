@@ -9,6 +9,22 @@ class Game(ABC):
     """
 
     @abstractmethod
+    def enumerate_chance(self, history: str) -> dict[str, float]:
+        """Return each outcome and corresponding probability on chance node.
+
+        Parameters
+        ----------
+        history : str
+            Encoded sequence of actions (and chance outcomes) so far;
+            must be a chance node.
+
+        Returns
+        -------
+        dict
+            Mapping from chance outcome to its probability.
+        """
+
+    @abstractmethod
     def sample_outcome(self, history: str) -> str:
         """Sample one chance outcome at a chance node.
 
